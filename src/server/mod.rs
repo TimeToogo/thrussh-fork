@@ -499,11 +499,23 @@ where
             },
             msg = session.receiver.recv() => {
                 match msg {
-                    Some((id, ChannelMsg::Data { data })) => {
-                        session.data(id, &data);
+                    Some((id, ChannelMsg::Data { data })) => {     
+                        let wrote = session.data(id, &data[..]);
+
+                        if wrote != data.len() {
+                            session.handle().sender.send((id, ChannelMsg::Data {
+                                data: CryptoVec::from_slice(&data[wrote..])
+                            })).await;
+                        }
                     }
                     Some((id, ChannelMsg::ExtendedData { ext, data })) => {
-                        session.extended_data(id, ext, &data);
+                        let wrote = session.extended_data(id, ext, &data);
+
+                        if wrote != data.len() {
+                            session.handle().sender.send((id, ChannelMsg::ExtendedData {
+                                ext, data: CryptoVec::from_slice(&data[wrote..])
+                            })).await;
+                        }
                     }
                     Some((id, ChannelMsg::Eof)) => {
                         session.eof(id);
