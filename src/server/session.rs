@@ -2,20 +2,20 @@ use super::*;
 use crate::msg;
 use std::sync::Arc;
 use thrussh_keys::encoding::Encoding;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 /// A connected server session. This type is unique to a client.
 pub struct Session {
     pub(crate) common: CommonSession<Arc<Config>>,
     pub(crate) sender: Handle,
-    pub(crate) receiver: Receiver<(ChannelId, ChannelMsg)>,
+    pub(crate) receiver: UnboundedReceiver<(ChannelId, ChannelMsg)>,
 }
 
 #[derive(Clone)]
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle {
-    pub(crate) sender: Sender<(ChannelId, ChannelMsg)>,
+    pub(crate) sender: UnboundedSender<(ChannelId, ChannelMsg)>,
 }
 
 impl Handle {
@@ -23,7 +23,6 @@ impl Handle {
     pub async fn data(&mut self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
         self.sender
             .send((id, ChannelMsg::Data { data }))
-            .await
             .map_err(|e| match e.0 {
                 (_, ChannelMsg::Data { data }) => data,
                 _ => unreachable!(),
@@ -39,7 +38,6 @@ impl Handle {
     ) -> Result<(), CryptoVec> {
         self.sender
             .send((id, ChannelMsg::ExtendedData { ext, data }))
-            .await
             .map_err(|e| match e.0 {
                 (_, ChannelMsg::ExtendedData { data, .. }) => data,
                 _ => unreachable!(),
@@ -50,7 +48,6 @@ impl Handle {
     pub async fn eof(&mut self, id: ChannelId) -> Result<(), ()> {
         self.sender
             .send((id, ChannelMsg::Eof))
-            .await
             .map_err(|_| ())
     }
 
@@ -60,7 +57,6 @@ impl Handle {
     pub async fn xon_xoff_request(&mut self, id: ChannelId, client_can_do: bool) -> Result<(), ()> {
         self.sender
             .send((id, ChannelMsg::XonXoff { client_can_do }))
-            .await
             .map_err(|_| ())
     }
 
@@ -68,7 +64,6 @@ impl Handle {
     pub async fn exit_status_request(&mut self, id: ChannelId, exit_status: u32) -> Result<(), ()> {
         self.sender
             .send((id, ChannelMsg::ExitStatus { exit_status }))
-            .await
             .map_err(|_| ())
     }
 
@@ -91,7 +86,6 @@ impl Handle {
                     lang_tag,
                 },
             ))
-            .await
             .map_err(|_| ())
     }
 }

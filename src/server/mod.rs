@@ -468,7 +468,7 @@ where
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(&mut stream);
     let common = read_ssh_id(config, &mut stream).await?;
-    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut session = Session {
         common,
         receiver,
@@ -505,7 +505,7 @@ where
                         if wrote != data.len() {
                             session.handle().sender.send((id, ChannelMsg::Data {
                                 data: CryptoVec::from_slice(&data[wrote..])
-                            })).await;
+                            }))?;
                         }
                     }
                     Some((id, ChannelMsg::ExtendedData { ext, data })) => {
@@ -514,7 +514,7 @@ where
                         if wrote != data.len() {
                             session.handle().sender.send((id, ChannelMsg::ExtendedData {
                                 ext, data: CryptoVec::from_slice(&data[wrote..])
-                            })).await;
+                            }))?;
                         }
                     }
                     Some((id, ChannelMsg::Eof)) => {
