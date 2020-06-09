@@ -211,11 +211,7 @@ pub trait Handler: Sized {
 
     /// Called when a new session channel is created.
     #[allow(unused_variables)]
-    fn channel_open_session(
-        self,
-        channel: ChannelId,
-        session: Session,
-    ) -> Self::FutureUnit {
+    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         self.finished(session)
     }
 
@@ -333,12 +329,7 @@ pub trait Handler: Sized {
     /// The client sends a command to execute, to be passed to a
     /// shell. Make sure to check the command before doing so.
     #[allow(unused_variables)]
-    fn exec_request(
-        self,
-        channel: ChannelId,
-        data: &[u8],
-        session: Session,
-    ) -> Self::FutureUnit {
+    fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         self.finished(session)
     }
 
@@ -371,35 +362,20 @@ pub trait Handler: Sized {
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
-    fn signal(
-        self,
-        channel: ChannelId,
-        signal_name: Sig,
-        session: Session,
-    ) -> Self::FutureUnit {
+    fn signal(self, channel: ChannelId, signal_name: Sig, session: Session) -> Self::FutureUnit {
         self.finished(session)
     }
 
     /// Used for reverse-forwarding ports, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
-    fn tcpip_forward(
-        self,
-        address: &str,
-        port: u32,
-        session: Session,
-    ) -> Self::FutureBool {
+    fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
         self.finished_bool(false, session)
     }
     /// Used to stop the reverse-forwarding of a port, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
-    fn cancel_tcpip_forward(
-        self,
-        address: &str,
-        port: u32,
-        session: Session,
-    ) -> Self::FutureBool {
+    fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
         self.finished_bool(false, session)
     }
 }
@@ -481,6 +457,9 @@ where
     session.common.write_buffer.buffer.clear();
     let mut buffer = SSHBuffer::new();
 
+    let mut data_queue = vec![];
+    let mut extended_data_queue = vec![];
+
     while !session.common.disconnected {
         tokio::select! {
             _ = cipher::read(&mut stream, &mut buffer, &session.common.cipher) => {
@@ -499,23 +478,11 @@ where
             },
             msg = session.receiver.recv() => {
                 match msg {
-                    Some((id, ChannelMsg::Data { data })) => {     
-                        let wrote = session.data(id, &data[..]);
-
-                        if wrote != data.len() {
-                            session.handle().sender.send((id, ChannelMsg::Data {
-                                data: CryptoVec::from_slice(&data[wrote..])
-                            }))?;
-                        }
+                    Some((id, ChannelMsg::Data { data })) => {
+                        data_queue.push((id, data));
                     }
                     Some((id, ChannelMsg::ExtendedData { ext, data })) => {
-                        let wrote = session.extended_data(id, ext, &data);
-
-                        if wrote != data.len() {
-                            session.handle().sender.send((id, ChannelMsg::ExtendedData {
-                                ext, data: CryptoVec::from_slice(&data[wrote..])
-                            }))?;
-                        }
+                        extended_data_queue.push((id, ext, data));
                     }
                     Some((id, ChannelMsg::Eof)) => {
                         session.eof(id);
@@ -535,6 +502,29 @@ where
                 }
             }
         }
+
+        while let Some((id, data)) = data_queue.first() {
+            let wrote = session.data(*id, data);
+
+            if wrote == data.len() {
+                data_queue.remove(0);
+            } else {
+                data_queue[0] = (*id, CryptoVec::from_slice(&data[wrote..]));
+                break;
+            }
+        }
+
+        while let Some((id, ext, data)) = extended_data_queue.first() {
+            let wrote = session.extended_data(*id, *ext, data);
+
+            if wrote == data.len() {
+                extended_data_queue.remove(0);
+            } else {
+                extended_data_queue[0] = (*id, *ext, CryptoVec::from_slice(&data[wrote..]));
+                break;
+            }
+        }
+
         session.flush()?;
         debug!("writing {:?}", &session.common.write_buffer.buffer[..]);
         stream
